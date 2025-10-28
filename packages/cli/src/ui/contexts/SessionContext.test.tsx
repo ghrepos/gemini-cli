@@ -4,14 +4,39 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { type MutableRefObject } from 'react';
+import { type MutableRefObject, Component, type ReactNode } from 'react';
 import { render } from 'ink-testing-library';
 
 import { act } from 'react';
 import type { SessionMetrics } from './SessionContext.js';
 import { SessionStatsProvider, useSessionStats } from './SessionContext.js';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { uiTelemetryService } from '@google/gemini-cli-core';
+
+class ErrorBoundary extends Component<
+  { children: ReactNode; onError: (error: Error) => void },
+  { hasError: boolean }
+> {
+  constructor(props: { children: ReactNode; onError: (error: Error) => void }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(_error: Error) {
+    return { hasError: true };
+  }
+
+  override componentDidCatch(error: Error) {
+    this.props.onError(error);
+  }
+
+  override render() {
+    if (this.state.hasError) {
+      return null;
+    }
+    return this.props.children;
+  }
+}
 
 /**
  * A test harness component that uses the hook and exposes the context value
@@ -206,12 +231,22 @@ describe('SessionStatsContext', () => {
   });
 
   it('should throw an error when useSessionStats is used outside of a provider', () => {
-    const { lastFrame } = render(
-      <TestHarness contextRef={{ current: undefined }} />,
+    const onError = vi.fn();
+    // Suppress console.error from React for this test
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    render(
+      <ErrorBoundary onError={onError}>
+        <TestHarness contextRef={{ current: undefined }} />
+      </ErrorBoundary>,
     );
 
-    expect(lastFrame()).toContain(
-      'useSessionStats must be used within a SessionStatsProvider',
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'useSessionStats must be used within a SessionStatsProvider',
+      }),
     );
+
+    consoleSpy.mockRestore();
   });
 });
